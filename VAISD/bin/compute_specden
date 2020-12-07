@@ -1,0 +1,436 @@
+#!/usr/bin/env python
+
+import os
+import re
+import sys
+import numpy as np
+import argparse as arg
+
+from VAISD import elph
+from VAISD import spec
+from VAISD import parseqm as pq
+
+au2ang = 0.5291771
+
+
+def options():
+    '''Defines the options of the script.'''
+
+    parser = arg.ArgumentParser(description='Normal Modes Analysis',
+                                formatter_class=arg.ArgumentDefaultsHelpFormatter)
+
+    #
+    # Input files
+    #
+    inp = parser.add_argument_group("Input Data")
+
+    inp.add_argument('--gs',
+                     default=None, type=str, dest="GSFile", required=True,
+                     help='''Ground State file''')
+
+    inp.add_argument('--es',
+                     default=None, type=str, dest="ESFile", required=True,
+                     help='''Excited State file''')
+
+    inp.add_argument('-s', '--sel', default=None, nargs='+', type=str,
+                     dest='AtomSel', help='''Atom Selection.''')
+
+    #
+    # Calculations Options
+    #
+    calc = parser.add_argument_group("Calculation Options")
+
+    calc.add_argument('-m', '--method',
+                      default="VG", choices=["VG", "AS"],
+                      type=lambda s : s.upper(), dest="Method",
+                      help='''Calculation Method''')
+
+    calc.add_argument('-t', '--thresh',
+                      default=None, type=float, dest="Thresh",
+                      help='''Ignore normal modes with frequency lower than a threshold''')
+
+    #
+    # Spectral Density Options
+    #
+    spec = parser.add_argument_group("Spectra Convolution Options")
+
+    spec.add_argument('--ls',
+                     default="lor", type=str, choices=["gau", "lor", "dlor"],
+                     dest="LineShape", help='''Spectral LineShape.''')
+
+    spec.add_argument('--lw',
+                     default=[5.0], type=float, nargs='+', dest="LineWidth",
+                     help='''Spectral LineWidth in wavenumbers (gamma for Lorentzian,
+                     sigma for Gaussian LineShape.''')
+
+    spec.add_argument('--unit',
+                     default="wn", type=str, choices=["eV", "wn"], dest="SpecUnit",
+                     help='''X axis unit for plotting Spectra.''')
+
+    #
+    # Output Options
+    #
+    out = parser.add_argument_group("Output Options")
+
+    out.add_argument('-o', '--out',
+                     default=None, type=str, dest="OutPref",
+                     help='''Output Prefix for files''')
+
+    out.add_argument('--figext',
+                     default=None, type=str, choices=["svg", "png", "eps", "pdf"],
+                     dest="FigExt", help='''Format for image output''')
+
+    out.add_argument('--savefigs',
+                     default=False, action="store_true", dest="SaveFigs",
+                     help='''Save figures''')
+
+    out.add_argument('-v', '--verbosity',
+                     default=0, action="count", dest="Verb",
+                     help='''Verbosity level''')
+
+    #
+    # Parse and create the Options Dictionary
+    #
+    args = parser.parse_args()
+    Opts = vars(args)
+
+    #
+    # Set default option for file naming
+    #
+    Opts['OutDir'] = os.getcwd()
+
+    if not Opts["OutPref"]:
+        Opts["OutPref"] = Opts["Method"]
+
+    Opts['OutPref'] = os.path.join(Opts['OutDir'], Opts['OutPref'] + '.')
+
+    if Opts['AtomSel']:
+        Opts['AtomSel'] = read_sel(Opts['AtomSel'])
+
+    return Opts
+
+
+def extend_compact_list(idxs):
+
+    extended = []
+
+    # Uncomment this line if idxs is a string and not a list
+    idxs = idxs.split()
+
+    for idx in idxs:
+
+        to_extend = idx.split('-')
+
+        if len(to_extend) > 1:
+
+            sel =  map(int, to_extend)
+            extended += range(sel[0],sel[1]+1,1)
+
+        else:
+        
+            extended.append(int(idx))
+    
+    return extended
+
+
+def read_sel(string):
+
+    string =  ','.join(string).replace(',,',',')
+
+    try:
+        f = open(string, 'r')
+        string = f.readlines()
+        f.close()
+        string =  ','.join(string).replace(',,',',')
+        string = string.replace(',', ' ')
+        string = map(lambda x: x - 1, extend_compact_list(string))
+
+    except IOError:
+        string = string.replace(',', ' ')
+        string = map(lambda x: x - 1, extend_compact_list(string))
+
+    return string
+
+
+def banner(text=None, ch='=', length=78):
+    """Return a banner line centering the given text.
+    
+        "text" is the text to show in the banner. None can be given to have
+            no text.
+        "ch" (optional, default '=') is the banner line character (can
+            also be a short string to repeat).
+        "length" (optional, default 78) is the length of banner to make.
+
+    Examples:
+        >>> banner("Peggy Sue")
+        '================================= Peggy Sue =================================='
+        >>> banner("Peggy Sue", ch='-', length=50)
+        '------------------- Peggy Sue --------------------'
+        >>> banner("Pretty pretty pretty pretty Peggy Sue", length=40)
+        'Pretty pretty pretty pretty Peggy Sue'
+    """
+    if text is None:
+        return ch * length
+
+    elif len(text) + 2 + len(ch)*2 > length:
+        # Not enough space for even one line char (plus space) around text.
+        return text
+
+    else:
+        remain = length - (len(text) + 2)
+        prefix_len = remain / 2
+        suffix_len = remain - prefix_len
+    
+        if len(ch) == 1:
+            prefix = ch * prefix_len
+            suffix = ch * suffix_len
+
+        else:
+            prefix = ch * (prefix_len/len(ch)) + ch[:prefix_len%len(ch)]
+            suffix = ch * (suffix_len/len(ch)) + ch[:suffix_len%len(ch)]
+
+        return prefix + ' ' + text + ' ' + suffix
+
+
+def prtstep(stepno, action=None, outstream=None):
+
+    if outstream:
+        sys.stdout = outstream
+
+    if not action:
+        title = banner("STEP %d" % stepno, ch="#", length=60) + "\n"
+        txt = ""
+        closing = "\n" + banner(ch="#", length=60) + "\n"
+
+    else:
+        title = banner("STEP %d" % stepno, ch="#", length=60) + "\n"
+        txt = "\n" + action
+        txt = banner(action, ch=" ", length=60) 
+        closing = "\n" + banner(ch="#", length=60) + "\n"
+
+    print(title + txt + closing)
+
+    return stepno + 1
+
+
+def print_dict(opts_dict, title=None, outstream=None):
+
+    if outstream:
+        sys.stdout = outstream
+
+    if not title:
+        title = "Options"
+
+    print(banner(ch="=", length=60))
+    print(title)
+    print()
+    fmt = "%-20s %-20s"
+    # print(fmt % ("# Option", "Value"))
+    for k, v in sorted(opts_dict.iteritems()):
+
+        if type(v) is str:
+            pass
+
+        if type(v) is int or type(v) is float:
+            v = str(v)
+
+        if type(v) is list:
+            v = ', '.join(map(str, v))
+
+        print(fmt % (k, v))
+
+    print(banner(ch="=", length=60))
+    print()
+    return
+
+def print_data(data):
+
+    data = " " + (re.sub('[\[\]]', '', np.array_str(data)))
+    print(banner(ch="=", length=60))
+
+    print()
+    print(banner(ch="-", length=60))
+    print("%13s %12s %12s %12s" % ("w (wn)", "Delta", "HR", "lambda (wn)"))
+    print(banner(ch="-", length=60))
+    
+    print(data)
+    print(banner(ch="-", length=60))
+    print(banner(ch="=", length=60))
+    print()
+    return
+
+
+def main():
+
+    step = 1
+    #
+    # Parse Command line Options
+    #
+    Opts = options()
+
+    if Opts['Verb'] > 0:
+        step = prtstep(step, action="PARSING OPTIONS")
+
+        if Opts['Verb'] > 1:
+            print_dict(Opts, title="General Options")
+
+    #
+    # Choose the parser depending on the method and on the input files
+    #
+    parsertype = pq.guess(Opts["GSFile"])
+    
+    if parsertype == "G09":
+        gsparser = pq.parsefreqs_G09
+
+        if Opts["Method"] == "VG":
+            esparser = pq.parseforces_G09
+
+        else:
+            esparser = pq.parseopt_G09
+    
+    
+    elif parsertype == "QChem":
+        gsparser = pq.parsefreqs_QChem
+
+        if Opts["Method"] == "VG":
+            esparser = pq.parseforces_QChem
+
+        else:
+            esparser = pq.parseopt_QChem
+
+    else:
+        print(" File type not known.")
+        sys.exit()
+
+    #
+    # Parse input files
+    #
+    gsdata = gsparser(Opts["GSFile"])
+    esdata = esparser(Opts["ESFile"])
+
+    #
+    # Normal Modes Analysis
+    #
+    if Opts['Verb'] > 0:
+        step = prtstep(step, action="NORMAL MODES ANALYSIS")
+
+    if Opts["Method"] == "VG":
+
+        masses = gsdata[1]
+        gsfreqs = gsdata[4]
+        gsmodes = gsdata[-1]
+        esgrad = esdata / au2ang
+
+        if Opts["AtomSel"]:
+            idxs = Opts["AtomSel"]
+            masses = masses[idxs]
+            gsmodes = gsmodes[:,idxs,:]
+            esgrad = esgrad[idxs]
+
+        if Opts["Thresh"]:
+            idxs = np.where(gsfreqs > Opts["Thresh"])
+            gsfreqs = gsfreqs[idxs]
+            gsmodes = gsmodes[idxs]
+
+        adimks, lambdas, HRs = elph.vg(masses, gsfreqs, gsmodes, esgrad)
+
+    else:
+
+        gsfreqs = gsdata[4]
+        gsmodes = gsdata[-1]
+        gscoor = gsdata[3]
+        escoor = esdata[3]
+        masses = gsdata[1]
+
+        if Opts["AtomSel"]:
+            idxs = Opts["AtomSel"]
+            masses = masses[idxs]
+            gsmodes = gsmodes[:,idxs,:]
+            gscoor = gscoor[idxs]
+            escoor = escoor[idxs]
+
+        if Opts["Thresh"]:
+            idxs = np.where(gsfreqs > Opts["Thresh"])
+            gsfreqs = gsfreqs[idxs]
+            gsmodes = gsmodes[idxs]
+
+        adimks, lambdas, HRs = elph.adiabshift(masses, gsfreqs, gsmodes, gscoor, escoor)
+
+    idxs = np.arange(len(gsfreqs)) + 1
+    results = np.c_[idxs, gsfreqs, adimks, HRs, lambdas]
+
+    if Opts['Verb'] > 1:
+        print_data(results[:,1:])
+
+    #
+    # Save Results of the Normal Modes Analysis
+    #
+    titles = (Opts["Method"], HRs.sum(), lambdas.sum(), "Mode", "freq (cm^-1)", "Dimless Shift", "HR", "Reorg. Ene. (cm^-1)")
+    header = ("\nResults of the Normal Modes Analysis\n"
+              "%s Approach\n"
+              "Total Huang-Rhys Factor: %24.6f\n"
+              "Total Reorganisation Energy (cm^-1): %12.6f\n\n"
+              "%4s %13s %16s %9s %20s\n" % titles)
+    fmt = "%6d %13.4f %16.8e %9.6f %12.6f"
+    np.savetxt(Opts["OutPref"] + "results.txt", results, fmt=fmt, header=header)
+
+    # Sorted by HR Factor
+    results = results[np.argsort(results[:,3])][::-1]
+    header = ("\nResults of the Normal Modes Analysis sorted by HR factors\n"
+              "%s Approach\n"
+              "Total Huang-Rhys Factor: %24.6f\n"
+              "Total Reorganisation Energy (cm^-1): %12.6f\n\n"
+              "%4s %13s %16s %9s %20s\n" % titles)
+    fmt = "%6d %13.4f %16.8e %9.6f %12.6f"
+    np.savetxt(Opts["OutPref"] + "sorted.txt", results, fmt=fmt, header=header)
+
+    #
+    # Convolute Spectral Density
+    #
+    if Opts['Verb'] > 0:
+        step = prtstep(step, action="CALCULATING SPECTRAL DENSITY")
+
+        if Opts['Verb'] > 1:
+            prtdict = dict((k, Opts[k]) for k in ["LineShape", "LineWidth", "SpecUnit"] if k in Opts)
+            print_dict(prtdict)
+
+    widths = Opts['LineWidth']
+
+    # Check LineWidths array length in comparison to ExcEnergies
+    try:
+        assert len(widths) == len(gsfreqs)
+
+    except AssertionError:
+        widths = Opts['LineWidth'] * len(gsfreqs)
+
+    finally:
+        assert len(widths) == len(gsfreqs)
+
+    SpecDen = spec.calcspecden(gsfreqs, lambdas, ls=Opts['LineShape'], widths=widths)
+
+    #
+    # Convoluted Spectral Density
+    #
+    titles = ("E (cm^-1)", "E (eV)", "Spectral Density (cm^-1)")
+    header = ("\nCalculated Spectral Density\n"
+              "Lineshape: %s\n"
+              "Linewidths (cm^-1): %s \n\n" % (Opts['LineShape'], widths[0]))
+
+    header1 = "%9s %10s %25s\n" % (titles)
+    fmt = "%11.4f %10.8f %17.8e"
+    np.savetxt(Opts['OutPref'] + "specden.txt", SpecDen, fmt=fmt, header=header+header1)
+
+    if Opts['FigExt']:
+
+        if Opts['Verb'] > 0:
+            step = prtstep(step, action="SAVING FIGURES")
+
+        figname = Opts['OutPref'] + "specden." + Opts['FigExt'] 
+        spec.plot(SpecDen, unit=Opts['SpecUnit'], figname=figname)
+
+    pass
+
+
+if __name__ == '__main__':
+    np.set_printoptions(formatter={'float': '{: 12.6f}'.format})
+    main()

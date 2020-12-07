@@ -1,0 +1,267 @@
+\documentclass[a4paper]{article}
+\usepackage[british,UKenglish]{babel}
+\usepackage{mathtools}
+\usepackage[hidelinks]{hyperref}
+\usepackage[usetitle=false]{rsc}
+\usepackage{a4wide}
+\usepackage{authblk}
+\usepackage{indentfirst}
+\usepackage{forest}
+\usepackage{amsmath}
+
+\newcommand{\matr}[1]{\mathbf{#1}}
+\newcommand{\diff}{\mathop{}\!\mathrm{d}}
+\newcommand{\vaisd}{\texttt{VAISD}}
+\renewcommand*{\thefootnote}{\alph{footnote}}
+
+% \setlength{\parindent}{0pt}
+\DeclarePairedDelimiter\norm{\lvert}{\rvert}
+
+\title{VAISD \\ \underline{V}ibrational \underline{A}nalysis for the \underline{I}ntramolecular \underline{S}pectral \underline{D}ensity}
+
+\author[1]{Daniele Padula\thanks{\href{mailto:dpadula85@yahoo.it}{dpadula85@yahoo.it}}}
+
+\affil[1]{\textit{Department of Chemistry, University of Warwick, Gibbet Hill Rd, CV47AL Coventry, U.K.}}
+
+\begin{document}
+
+\maketitle
+
+\section{Presentation}
+
+The objective of this program is to evaluate the coupling between an electronic excitation and the nuclear degrees of freedom, in terms of the Spectral Density, $J(\omega)$.
+
+Usually, this quantity is studied for biological chromophores embedded in a proteic environment, and the typical procedure to evaluate it involves the Fourier Trasform of the autocorrelation function of the excitation energy along a classical Molecular Dynamics trajectory,\cite{Coker2016} as in
+
+\begin{gather}
+J(\omega) = \frac{\beta\omega}{\pi}\int_0^\infty C(t) \cos(\omega t) \diff t \\
+C(t) = \langle \delta\varepsilon(t) \delta\varepsilon(0) \rangle
+\end{gather}
+
+where $C(t)$ is the autocorrelation function of the excitation energy $\varepsilon$ along a classical MD trajectory.
+
+However, as recently pointed out,\cite{Coker2016} this procedure could return inaccurate results due to the incosistency between the classical potential of the MD trajectory and the quantum potential used for the calculation of the excitation energy for a set of snapshots.
+In refs. \citenum{Coker2016,Coker20162}, the authors propose a procedure to separate the contribution to the Spectral Density into short range and long range contributions, and they propose to evaluate the short range contribution from QM calculations.
+
+However, the procedure that they propose is quite time consuming and computationally expensive. This program represents an effort to make their procedure much more affordable, by using the experience and knowledge I acquired during my PhD stay in Dr.~Fabrizio Santoro's group, on the approximation of the excited state Potential Energy Surface (PES). More details about the methods implemented are given in the Theory section.
+
+\section{Requirements}
+
+\vaisd\ is a program written in Python. A working installation of python with numpy is the only requirement.
+
+\section{Installation}
+
+To install \vaisd\ on your machine, few simple steps are needed.
+Get a copy of the program cloning the git repository:
+
+\begin{verbatim}
+  $ git clone https://github.com/dpadula85/VAISD
+\end{verbatim}
+
+Alternatively, you could browse to the address \url{https://github.com/dpadula85/VAISD} and download a \verb|.zip| file with the appropriate button.
+
+% The directory structure of the program is as follows
+% 
+% \begin{forest}
+%   for tree={
+%     font=\ttfamily,
+%     grow'=0,
+%     child anchor=west,
+%     parent anchor=south,
+%     anchor=west,
+%     calign=first,
+%     edge path={
+%       \noexpand\path [draw, \forestoption{edge}]
+%       (!u.south west) +(7.5pt,0) |- node[fill,inner sep=1.25pt] {} (.child anchor)\forestoption{edge label};
+%     },
+%     before typesetting nodes={
+%       if n=1
+%         {insert before={[,phantom]}}
+%         {}
+%     },
+%     fit=band,
+%     before computing xy={l=15pt},
+%   }
+% [./
+%   [doc]
+%   [stable]
+%   [tests]
+% ]
+% \end{forest}
+
+Install requirements by running
+\begin{verbatim}
+  $ pip -r requirements.txt
+\end{verbatim}
+
+Finally, the package can be installed by running
+\begin{verbatim}
+  $ python setup.py install
+\end{verbatim}
+
+\section{Running tests}
+
+In case you want to familiarise with the program and its options, we suggest you run the tests distributed with the program.
+To do so, go in the \verb|tests| directory and run the command
+
+\begin{verbatim}
+  $ make
+\end{verbatim}
+
+The result of the tests is summarized in the file \verb|tests/logfile|. For more details about the tests, feel free to change directory to each test and have a look at the files.
+
+\section{Theory}
+
+\subsection*{Spectral Density Separation}
+
+As reported in ref. \citenum{Coker2016}, the key point is to define the fluctuation of the excitation energy as a sum of a short range and a long range contributions, that allows to define the autocorrelation function as the sum of two contributions.
+
+\begin{gather}
+\delta\varepsilon \approx \delta\varepsilon_{sr} + \delta\varepsilon_{lr} \\
+C(t) \approx \langle \delta\varepsilon_{sr}(t) \delta\varepsilon_{sr}(0) \rangle + \langle \delta\varepsilon_{lr}(t) \delta\varepsilon_{lr}(0) \rangle
+\end{gather}
+
+The separation of short and long range contributions is essentially defined by the molecular structure, being the short range contributions the intramolecular ones and the long range contributions the intermolecular ones.
+Within this scheme, the Spectral Density takes the form of
+ 
+\begin{equation}
+J(\omega) \approx J_{intra}(\omega) + J_{inter}(\omega)
+\end{equation}
+
+In the following, we'll analyse how to obtain the quantities necessary to evaluate $J_{intra}(\omega)$ starting from QM calculations, assuming for the Spectral Density a Debye form, as in
+
+\begin{equation}
+J_{intra}(\omega) = \pi \sum_i^{3N-6} \omega_i \lambda_i \delta(\omega - \omega_i)
+\end{equation}
+
+for which the frequency $\omega$ and the reorganisation energy $\lambda$ for each of the $3N-6$ normal modes are required.
+
+\subsection*{Excited State PES approximations\cite{Santoro2012}}
+
+The process under analysis involves the electronic excitation of a molecule of $N$ atoms from the ground state $\vert g \rangle$ to its electronic excited state $\vert e \rangle$.
+The normal modes of the excited state can be expressed in terms of the normal modes of the ground state. In matrix formalism, we have
+
+\begin{equation}
+\matr{Q}_e = \matr{JQ}_g + \matr{K}
+\end{equation}
+
+where $\matr{Q}_g$ and $\matr{Q}_e$ are the normal modes vectors of the ground and excited state, respectively, $\matr{J}$ is the Duschinsky matrix, and $\matr{K}$ is the displacement vector.
+
+Normal modes $\matr{Q}$ are characterised by their oscillation frequencies $\matr{\Omega}$, and are usually written by QM packages in terms of cartesian displacements $\matr{\Delta}_x$ for each coordinate of each atom, where $x$ denotes the cartesian coordinate system. For our purposes we will define normal modes in mass-weighted cartesian coordinates, as in
+
+\begin{equation}
+\matr{Q} = \matr{M}^{\frac{1}{2}}\matr{\Delta}_x
+\end{equation}
+
+where $M$ is the diagonal matrix of atomic masses, and we'll adopt the harmonic approximation for Potential Energy Surfaces (PESs).
+
+\subsubsection*{Adiabatic Shift Approach}
+
+The simplest approximation to work with is assuming that the normal modes of the two states are the same ($\matr{J} = \matr{I}$). The Duschinsky equation becomes
+
+\begin{equation}
+\matr{Q}_e = \matr{Q}_g + \matr{K}
+\end{equation}
+
+where $\matr{Q}_g$ and $\matr{Q}_e$ have the same frequencies and are described by the same vibrations, so we'll label them $\matr{Q}$. The displacements vector $\matr{K}$ can be easily calculated from the equilibrium geometries of the two states, as in
+
+\begin{equation}
+\matr{K} = \matr{M}^{\frac{1}{2}}(\matr{x}_e - \matr{x}_g)
+\end{equation}
+
+where $\matr{x}_g$ and $\matr{x}_e$ represent the equilibrium geometries of the ground and excited state in cartesian coordinates. The two equilibrium geometries can be obtained by geometry optimisations performed with various QM packages (\textit{e.g.} Gaussian09, QChem, ORCA or others).
+
+The normal mode displacements $\matr{K}$ are obtained in mass-weighted cartesian coordinates, and they can be transformed in dimensionless displacements $\matr{\Delta}$ according to\cite{Neese2007}
+
+\begin{equation}
+\Delta_i = K_i\sqrt{\frac{\omega_i}{\hbar}}
+\end{equation}
+
+We can now estimate the reorganisation energies ($\lambda_i$) and Huang-Rhys factors ($S_i$) for each normal mode and the total ones according to
+
+\begin{gather}
+\lambda_i = \frac{1}{2} \omega_i \Delta_i^2 \\
+\lambda = \sum_i^{3N-6} \lambda_i \\
+S_i = \frac{1}{2} \Delta_i^2 \\
+S = \sum_i^{3N-6} S_i
+\end{gather}
+
+where $\omega_i$ represents the frequency og the $i$-th normal mode, that can be obtained by harmonic analysis with some QM package.
+
+\subsubsection*{Vertical Gradient Approach}
+
+Within the assumption that the normal modes of the two states are the same ($\matr{J} = \matr{I}$), it is possible to retrieve the displacements $\matr{K}$ on the excited state PES from the excited state gradient at the Franck-Condon point, as in
+
+\begin{equation}
+\matr{K} = -\matr{\Omega}^{-2}\matr{g}_e
+\end{equation}
+
+where $\matr{\Omega}$ is the diagonal matrix of the frequencies in the excited state, which are the same as the groud state, as stated above. $\matr{g}_e$ represents the excited state gradient along the normal modes at the Franck-Condon point. This approach is very useful when the equilibrium geometry of the excited state cannot be easily obtained.
+
+The mentioned QM packages allow to calculate the excited state cartesian gradient $\matr{g}^x_e$ at the Franck-Condon point. To use this information to retrieve the displacements, we should transform the cartesian gradient in the same coordinates used for normal modes (mass-weighted cartesian coordinates), as in
+
+\begin{equation}
+\matr{g}^{mwc}_e = \matr{M}^{-\frac{1}{2}}\matr{g}^x_e
+\end{equation}
+
+Once the displacements $\matr{K}$ are obtained, we retrieve the dimensionless displacements $\matr{\Delta}$ and hence estimate reorganisation energies ($\lambda_i$) and Huang-Rhys factors ($S_i$).
+
+
+\section{Features and Options}
+\label{Options}
+A short help including the list of options is available by running the command
+
+\begin{verbatim}
+  $ compute_specden -h
+\end{verbatim}
+
+The output of this command is as follows.
+
+\begin{verbatim}
+ 
+  usage: compute_specden [-h] [--gs GSFILE] [--es ESFILE] [-m {VG,AS}] [--ls {gau,lor}]
+                  [--lw LINEWIDTH [LINEWIDTH ...]] [--unit {eV,wn}] [-o OUTPREF]
+                  [--figext {svg,png,eps,pdf}] [--savefigs] [-v]
+
+  Normal Modes Analysis
+
+  optional arguments:
+    -h, --help            show this help message and exit
+
+  Input Data:
+    --gs GSFILE           Ground State file (default: None)
+    --es ESFILE           Excited State file (default: None)
+
+  Calculation Options:
+    -m {VG,AS}, --method {VG,AS}
+                          Calculation Method (default: VG)
+
+  Spectra Convolution Options:
+    --ls {gau,lor}        Spectral LineShape. (default: lor)
+    --lw LINEWIDTH [LINEWIDTH ...]
+                          Spectral LineWidth in wavenumbers (gamma for
+                          Lorentzian, sigma for Gaussian LineShape. (default:
+                          [5.0])
+    --unit {eV,wn}        X axis unit for plotting Spectra. (default: wn)
+
+  Output Options:
+    -o OUTPREF, --out OUTPREF
+                          Output Prefix for files (default: None)
+    --figext {svg,png,eps}
+                          Format for image output (default: None)
+    --savefigs            Save figures (default: False)
+    -v, --verbosity       Verbosity level (default: 0)
+
+\end{verbatim}
+
+The program requires two arguments to be specified, the \verb|--gs| and the \verb|--es| arguments, and directly parses output files from QM packages.\footnotemark The \verb|--gs| argument expects a ground state frequencies calculation output. The \verb|--es| argument expects either an excited state gradient calculation at the Franck-Condon point or an excited state geometry optimisation output, depending on the method you choose with the \verb|-m, --method| argument. Currently, only the Vertical Gradient (VG) and the Adiabatic Shift (AS) methods explained above are implemented. The default option selects the VG method, and thus requires a gradient output for the \verb|--es| option.
+\footnotetext{Currently only Gaussian09 and QChem are supported. If you use another QM package, please contact me to provide the files necessary for me to implement support for your favourite QM package.}
+
+All other options are not required and define the convolution of the Spectral Density and the possibility to save pictures generated directly by \vaisd\ . The usage of these options should be straightfoward. The \verb|-v, --verbosity| option controls how much output should be printed at the standard output. The \verb|-o, --output| option prepends a prefix to the output files. If this option is not specified, the name of the method used for the calculation will be used.
+
+The basic output of the program consists of three files. The \verb|results.txt| and \verb|sorted.txt| files contain the results of the vibrational analysis, sorted by normal mode index and by Huang-Rhys factor, respectively. The \verb|specden.txt| file contains the convoluted spectral density, which can optionally be saved directly as image as well, with the \verb|--savefigs, --figext| options.
+
+\bibliographystyle{rsc}
+\bibliography{refs}
+
+\end{document}
